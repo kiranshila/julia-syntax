@@ -10,25 +10,31 @@ use nom::{
 
 // Numbers
 
-fn hexadecimal(input: &str) -> IResult<&str, &str> {
-    recognize(preceded(
-        tag("0x"),
-        separated_list1(char('_'), many1(one_of("0123456789abcdefABCDEF"))),
+fn hex_body(input: &str) -> IResult<&str, &str> {
+    recognize(separated_list1(
+        char('_'),
+        many1(one_of("0123456789abcdefABCDEF")),
     ))(input)
+}
+
+fn octal_body(input: &str) -> IResult<&str, &str> {
+    recognize(separated_list1(char('_'), many1(one_of("01234567"))))(input)
+}
+
+fn binary_body(input: &str) -> IResult<&str, &str> {
+    recognize(separated_list1(char('_'), many1(one_of("01"))))(input)
+}
+
+fn hexadecimal(input: &str) -> IResult<&str, &str> {
+    recognize(preceded(tag("0x"), hex_body))(input)
 }
 
 fn octal(input: &str) -> IResult<&str, &str> {
-    recognize(preceded(
-        tag("0o"),
-        separated_list1(char('_'), many1(one_of("01234567"))),
-    ))(input)
+    recognize(preceded(tag("0o"), octal_body))(input)
 }
 
 fn binary(input: &str) -> IResult<&str, &str> {
-    recognize(preceded(
-        tag("0b"),
-        separated_list1(char('_'), many1(one_of("01"))),
-    ))(input)
+    recognize(preceded(tag("0b"), binary_body))(input)
 }
 
 fn integer(input: &str) -> IResult<&str, &str> {
@@ -41,7 +47,11 @@ fn float(input: &str) -> IResult<&str, &str> {
         recognize(tuple((
             char('.'),
             integer,
-            opt(tuple((one_of("eEfF"), opt(one_of("+-")), integer))),
+            opt(tuple((
+                one_of("eEfF"),
+                opt(one_of("+-")),
+                many1(one_of("0123456789")),
+            ))),
         ))),
         // Case two: 42e42 and 42.42e42
         recognize(tuple((
@@ -49,10 +59,35 @@ fn float(input: &str) -> IResult<&str, &str> {
             opt(preceded(char('.'), integer)),
             one_of("eEfF"),
             opt(one_of("+-")),
-            integer,
+            many1(one_of("0123456789")), // No underscores in exponent
         ))),
         // Case three: 42. and 42.42
         recognize(tuple((integer, char('.'), opt(integer)))),
+        // Special case literals
+        recognize(alt((
+            tag("NaN32"),
+            tag("NaN64"),
+            tag("NaN"),
+            tag("-Inf32"),
+            tag("-Inf64"),
+            tag("-Inf"),
+            tag("Inf32"),
+            tag("Inf64"),
+            tag("Inf"),
+        ))),
+        // Cursed hex float literals
+        recognize(preceded(
+            tag("0x"),
+            tuple((
+                alt((
+                    recognize(tuple((hex_body, opt(tuple((char('.'), hex_body)))))),
+                    recognize(tuple((char('.'), hex_body))),
+                )),
+                char('p'),
+                opt(one_of("+-")),
+                many1(one_of("0123456789")),
+            )),
+        )),
     ))(input)
 }
 
@@ -106,6 +141,20 @@ mod num_tests {
         assert_eq!(float(".5"), Ok(("", ".5")));
         assert_eq!(float("1e10"), Ok(("", "1e10")));
         assert_eq!(float("2.5e-4"), Ok(("", "2.5e-4")));
+        assert_eq!(float("2.5f-4"), Ok(("", "2.5f-4")));
         assert_eq!(float("1_000_000f-4"), Ok(("", "1_000_000f-4")));
+        assert_eq!(float("-Inf32"), Ok(("", "-Inf32")));
+        assert_eq!(float("0xDEAD.BEEF_420p69"), Ok(("", "0xDEAD.BEEF_420p69")));
+        assert_eq!(
+            float("0xDEAD.BEEF_420p+69"),
+            Ok(("", "0xDEAD.BEEF_420p+69"))
+        );
+        assert_eq!(
+            float("0xDEAD.BEEF_420p-69"),
+            Ok(("", "0xDEAD.BEEF_420p-69"))
+        );
+        assert_eq!(float("0x.BEEF_420p69"), Ok(("", "0x.BEEF_420p69")));
+        assert_eq!(float("0x.BEEF_420p-69"), Ok(("", "0x.BEEF_420p-69")));
+        assert_eq!(float("0x.D_E_A_Dp-69"), Ok(("", "0x.D_E_A_Dp-69")));
     }
 }
