@@ -156,5 +156,6 @@ mod num_tests {
         assert_eq!(float("0x.BEEF_420p69"), Ok(("", "0x.BEEF_420p69")));
         assert_eq!(float("0x.BEEF_420p-69"), Ok(("", "0x.BEEF_420p-69")));
         assert_eq!(float("0x.D_E_A_Dp-69"), Ok(("", "0x.D_E_A_Dp-69")));
+        assert_eq!(float("0x.4p-1"), Ok(("", "0x.4p-1")));
     }
 }
