@@ -1,7 +1,4 @@
-use nom_locate::{position, LocatedSpan};
-
-// Type Alias for the span fragment
-pub type Span<'a> = LocatedSpan<&'a str>;
+use crate::parser::Span;
 
 /// Terminal Tokens
 #[derive(Clone, Copy, PartialEq, Debug)]

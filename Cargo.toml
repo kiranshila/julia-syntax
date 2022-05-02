@@ -5,6 +5,11 @@ version = "0.1.0"
 
 [dependencies]
 miette = "4"
+thiserror = "1"
 nom = "7"
 nom_locate = "4"
 unicode-general-category = "0.5"
+
+[features]
+default = []
+fancy = ["miette/fancy"]

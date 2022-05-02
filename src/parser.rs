@@ -1,5 +1,6 @@
+use crate::errors::JuliaParseError;
 use crate::extensions::{is_char_id, is_char_id_start};
-use crate::syntax::{AssignmentExpr, IdentifierLiteral, NumericLiteral, OperatorLiteral, Span};
+use crate::syntax::{AssignmentExpr, IdentifierLiteral, NumericLiteral, OperatorLiteral};
 use nom::{
     branch::alt,
     bytes::complete::{tag, take_while},
@@ -7,52 +8,59 @@ use nom::{
     combinator::{all_consuming, complete, cut, map_res, opt, recognize, verify},
     multi::{many0, many1, separated_list1},
     sequence::{pair, preceded, tuple},
-    IResult,
+    Finish,
 };
+use nom_locate::{position, LocatedSpan};
+
+/// Type Alias for the span fragment
+pub type Span<'a> = LocatedSpan<&'a str>;
+
+/// Convenient type alias for `nom::IResult<I, O>` reduced to `IResult<O>`.
+type IResult<'a, T> = nom::IResult<Span<'a>, Result<T, JuliaParseError>>;
 
 // Numbers
 
-fn hex_body(input: Span) -> IResult<Span, Span> {
+fn hex_body(input: Span) -> IResult<Span> {
     recognize(separated_list1(char('_'), hex_digit1))(input)
 }
 
-fn hexadecimal(input: Span) -> IResult<Span, NumericLiteral> {
+fn hexadecimal(input: Span) -> IResult<NumericLiteral> {
     map_res(
         recognize(preceded(tag("0x"), hex_body)),
         |s| -> Result<NumericLiteral, ()> { Ok(NumericLiteral::Hexadecimal(s)) },
     )(input)
 }
 
-fn octal_body(input: Span) -> IResult<Span, Span> {
+fn octal_body(input: Span) -> IResult<Span> {
     recognize(separated_list1(char('_'), oct_digit1))(input)
 }
 
-fn octal(input: Span) -> IResult<Span, NumericLiteral> {
+fn octal(input: Span) -> IResult<NumericLiteral> {
     map_res(
         recognize(preceded(tag("0o"), octal_body)),
         |s| -> Result<NumericLiteral, ()> { Ok(NumericLiteral::Octal(s)) },
     )(input)
 }
 
-fn binary_body(input: Span) -> IResult<Span, Span> {
+fn binary_body(input: Span) -> IResult<Span> {
     recognize(separated_list1(char('_'), many1(one_of("01"))))(input)
 }
 
-fn binary(input: Span) -> IResult<Span, NumericLiteral> {
+fn binary(input: Span) -> IResult<NumericLiteral> {
     map_res(
         recognize(preceded(tag("0b"), binary_body)),
         |s| -> Result<NumericLiteral, ()> { Ok(NumericLiteral::Binary(s)) },
     )(input)
 }
 
-fn integer(input: Span) -> IResult<Span, NumericLiteral> {
+fn integer(input: Span) -> IResult<NumericLiteral> {
     map_res(
         recognize(separated_list1(tag("_"), digit1)),
         |s| -> Result<NumericLiteral, ()> { Ok(NumericLiteral::Integer(s)) },
     )(input)
 }
 
-fn float(input: Span) -> IResult<Span, NumericLiteral> {
+fn float(input: Span) -> IResult<NumericLiteral> {
     map_res(
         alt((
             // Case one: .42
@@ -101,17 +109,11 @@ fn float(input: Span) -> IResult<Span, NumericLiteral> {
     )(input)
 }
 
-/// Internal testing fn
-
 #[cfg(test)]
 mod num_tests {
     use super::*;
 
-    fn test_spanned(
-        parser: fn(Span) -> IResult<Span, NumericLiteral>,
-        input: &str,
-        remaining: &str,
-    ) {
+    fn test_spanned(parser: fn(Span) -> IResult<NumericLiteral>, input: &str, remaining: &str) {
         let in_span = Span::new(input);
         let (remaining_span, _) = parser(in_span).unwrap();
         assert_eq!(remaining_span.fragment(), &remaining);
@@ -168,7 +170,7 @@ mod num_tests {
 
 // Identifiers (non operator)
 
-fn identifier(input: Span) -> IResult<Span, IdentifierLiteral> {
+fn identifier(input: Span) -> IResult<IdentifierLiteral> {
     map_res(
         recognize(pair(satisfy(is_char_id_start), many0(satisfy(is_char_id)))),
         |s| -> Result<IdentifierLiteral, ()> { Ok(IdentifierLiteral(s)) },
@@ -179,11 +181,7 @@ fn identifier(input: Span) -> IResult<Span, IdentifierLiteral> {
 mod ident_tests {
     use super::*;
 
-    fn test_spanned(
-        parser: fn(Span) -> IResult<Span, IdentifierLiteral>,
-        input: &str,
-        remaining: &str,
-    ) {
+    fn test_spanned(parser: fn(Span) -> IResult<IdentifierLiteral>, input: &str, remaining: &str) {
         let in_span = Span::new(input);
         let (remaining_span, _) = parser(in_span).unwrap();
         assert_eq!(remaining_span.fragment(), &remaining);
@@ -202,7 +200,7 @@ mod ident_tests {
 
 // Operators (Buckle up)
 
-fn assignment(input: Span) -> IResult<Span, OperatorLiteral> {
+fn assignment(input: Span) -> IResult<OperatorLiteral> {
     map_res(
         alt((
             recognize(pair(
@@ -241,11 +239,7 @@ fn assignment(input: Span) -> IResult<Span, OperatorLiteral> {
 mod operator_tests {
     use super::*;
 
-    fn test_spanned(
-        parser: fn(Span) -> IResult<Span, OperatorLiteral>,
-        input: &str,
-        remaining: &str,
-    ) {
+    fn test_spanned(parser: fn(Span) -> IResult<OperatorLiteral>, input: &str, remaining: &str) {
         let in_span = Span::new(input);
         let (remaining_span, _) = parser(in_span).unwrap();
         assert_eq!(remaining_span.fragment(), &remaining);
@@ -259,12 +253,12 @@ mod operator_tests {
     }
 }
 
-fn numeric(input: Span) -> IResult<Span, NumericLiteral> {
+fn numeric(input: Span) -> IResult<NumericLiteral> {
     alt((float, hexadecimal, octal, binary, integer))(input)
 }
 
 // Toy example, not real
-fn assignment_expr(input: Span) -> IResult<Span, AssignmentExpr> {
+fn assignment_expr(input: Span) -> IResult<AssignmentExpr> {
     let (input, lvalue) = identifier(input)?;
     let (input, operator) = assignment(input)?;
     let (input, rvalue) = numeric(input)?;
@@ -283,8 +277,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_name() {
-        println!("{:#?}", assignment_expr(Span::new("foo_bar+=120e23")));
+    fn test_name() -> miette::Result<()> {
+        assignment_expr(Span::new("foo_bar?+=0xDEAD_BEEF_"))?;
         assert!(false);
+        Ok(())
     }
 }
